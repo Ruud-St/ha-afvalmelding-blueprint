@@ -10,6 +10,7 @@ blueprint:
     Gebeurtenissen. Beide meldingen worden dan direct achter elkaar getest.
 
   domain: automation
+  source_url: https://github.com/Ruud-St/ha-afvalmelding-blueprint/blob/main/afvalmelding.yaml
   homeassistant:
     min_version: "2024.10.0"
 
