@@ -1,0 +1,274 @@
+blueprint:
+  name: Afvalmelding met herinnering en interactie (v5.1)
+  description: >-
+    Stuurt 's avonds een melding als er morgen afval opgehaald wordt, en later
+    op de avond een vraag met Ja/Nee-knoppen of de bak al aan de weg staat.
+    - "Ja"         -> klaar voor vandaag, de melding wordt van je telefoon gehaald.
+    - "Nog niet"   -> na X minuten alsnog een herinnering.
+    - Geen reactie -> na X minuten een herinnering.
+    Testen: vuur het event `afvalmelding_test` af via Instellingen > Tools > 
+    Gebeurtenissen. Beide meldingen worden dan direct achter elkaar getest.
+
+  domain: automation
+  homeassistant:
+    min_version: "2024.10.0"
+
+  input:
+    sensoren:
+      name: Afvalsensoren
+      icon: mdi:trash-can-outline
+      input:
+        restafval_sensor:
+          name: Sensor restafval
+          selector:
+            entity:
+              filter:
+                - domain: sensor
+        pbd_sensor:
+          name: Sensor plastic (PBD)
+          selector:
+            entity:
+              filter:
+                - domain: sensor
+        gft_sensor:
+          name: Sensor GFT
+          selector:
+            entity:
+              filter:
+                - domain: sensor
+        kerstboom_sensor:
+          name: Sensor kerstboom (optioneel)
+          description: Laat leeg als je deze niet gebruikt.
+          default: ""
+          selector:
+            entity:
+              filter:
+                - domain: sensor
+
+    meldingen:
+      name: Meldingen
+      icon: mdi:cellphone-message
+      input:
+        notify_devices:
+          name: Telefoons / tablets
+          description: >-
+            Kies de apparaten met de Home Assistant Companion-app. Meerdere
+            apparaten selecteren mag. Er wordt gemeld via
+            notify.mobile_app_<apparaatnaam>, omdat notify.send_message geen
+            knoppen ondersteunt.
+          selector:
+            device:
+              filter:
+                - integration: mobile_app
+              multiple: true
+
+    tijden:
+      name: Tijden
+      icon: mdi:clock-outline
+      input:
+        melding_tijd:
+          name: Tijd eerste melding
+          default: "19:00:00"
+          selector:
+            time: {}
+        vraag_tijd:
+          name: Tijd vraag met knoppen
+          default: "22:00:00"
+          selector:
+            time: {}
+        herinnering_delay:
+          name: Minuten tot herinnering
+          description: Wachttijd na "Nog niet" of na geen enkele reactie.
+          default: 15
+          selector:
+            number:
+              min: 1
+              max: 60
+              unit_of_measurement: minuten
+              mode: slider
+
+mode: restart
+max_exceeded: silent
+
+variables:
+  restafval_sensor_id: !input restafval_sensor
+  pbd_sensor_id: !input pbd_sensor
+  gft_sensor_id: !input gft_sensor
+  kerstboom_sensor_id: !input kerstboom_sensor
+  apparaten: !input notify_devices
+
+  # Lijst met paren: [korte naam, bak-naam]
+  # bijv. [['het gft-afval', 'de gft-bak']]
+  bakken: >-
+    {%- set ns = namespace(l=[]) -%}
+    {%- set bronnen = [
+        (restafval_sensor_id, 'het restafval',    'de restafvalbak'),
+        (pbd_sensor_id,       'het plasticafval', 'de PBD-bak'),
+        (gft_sensor_id,       'het gft-afval',    'de gft-bak'),
+        (kerstboom_sensor_id, 'de kerstboom',     'de kerstboom')
+      ] -%}
+    {%- for sid, kort, bak in bronnen -%}
+      {%- if sid and state_attr(sid, 'days_until_collection_date') | int(-1) == 1 -%}
+        {%- set ns.l = ns.l + [[kort, bak]] -%}
+      {%- endif -%}
+    {%- endfor -%}
+    {{ ns.l }}
+
+  aantal: "{{ bakken | count }}"
+
+  # "het restafval en het gft-afval"
+  tekst_kort: >-
+    {%- set l = bakken | map(attribute=0) | list -%}
+    {{ (l[:-1] | join(', ') ~ ' en ' ~ l[-1]) if l | count > 1 else l | join('') }}
+
+  # "de restafvalbak en de gft-bak"
+  tekst_bak: >-
+    {%- set l = bakken | map(attribute=1) | list -%}
+    {{ (l[:-1] | join(', ') ~ ' en ' ~ l[-1]) if l | count > 1 else l | join('') }}
+
+  # "de bak" / "de bakken" / "deze" (alleen kerstboom) / "alles" (gemengd)
+  wat_buiten: >-
+    {%- set korten = bakken | map(attribute=0) | list -%}
+    {%- set n_bak = korten | reject('eq', 'de kerstboom') | list | count -%}
+    {%- if n_bak == 0 -%}deze
+    {%- elif n_bak != korten | count -%}alles
+    {%- elif n_bak == 1 -%}de bak
+    {%- else -%}de bakken{%- endif -%}
+
+triggers:
+  - trigger: time
+    at: !input melding_tijd
+    id: eerste_melding
+  - trigger: time
+    at: !input vraag_tijd
+    id: vraag_melding
+  - trigger: event
+    event_type: afvalmelding_test
+    id: test
+
+conditions:
+  - condition: template
+    value_template: "{{ trigger.id == 'test' or aantal > 0 }}"
+
+actions:
+  # Unieke action-ID's per run, zodat oude notificaties nooit een
+  # nieuwe run kunnen beinvloeden.
+  - variables:
+      actie_ja: "AFVAL_JA_{{ context.id }}"
+      actie_nee: "AFVAL_NEE_{{ context.id }}"
+      is_test: "{{ trigger.id == 'test' }}"
+
+  # ---------------------------------------------------------------
+  # 1. Eerste melding (en bij een test)
+  # ---------------------------------------------------------------
+  - if:
+      - condition: template
+        value_template: "{{ trigger.id in ['eerste_melding', 'test'] }}"
+    then:
+      - repeat:
+          for_each: "{{ apparaten }}"
+          sequence:
+            - action: "notify.mobile_app_{{ device_attr(repeat.item, 'name') | slugify }}"
+              data:
+                title: "{{ '🗑️ Afvalmelding test' if is_test and aantal == 0 else '🗑️ Afvalmelding' }}"
+                message: >-
+                  {%- if aantal == 0 -%}
+                    Dit is een test. Er wordt morgen niets opgehaald, maar je notificaties werken.
+                  {%- else -%}
+                    Morgen {{ 'worden' if aantal > 1 else 'wordt' }} {{ tekst_kort }} opgehaald.
+                    Vergeet niet om {{ wat_buiten }} aan de weg te zetten.
+                  {%- endif -%}
+                data:
+                  tag: afvalmelding
+
+  # ---------------------------------------------------------------
+  # Bij een test even pauzeren, anders vervangt melding 2 de eerste
+  # meteen (beide hebben dezelfde tag).
+  # ---------------------------------------------------------------
+  - if:
+      - condition: template
+        value_template: "{{ is_test }}"
+    then:
+      - delay:
+          seconds: 15
+
+  # ---------------------------------------------------------------
+  # 2. Vraag met knoppen + opvolging (en bij een test)
+  # ---------------------------------------------------------------
+  - if:
+      - condition: template
+        value_template: "{{ trigger.id in ['vraag_melding', 'test'] }}"
+    then:
+      - repeat:
+          for_each: "{{ apparaten }}"
+          sequence:
+            - action: "notify.mobile_app_{{ device_attr(repeat.item, 'name') | slugify }}"
+              data:
+                title: "{{ '🗑️ Afvalmelding test' if is_test and aantal == 0 else '🗑️ Afvalmelding herinnering' }}"
+                message: >-
+                  {%- if aantal == 0 -%}
+                    Test van de knoppen. Werkt het?
+                  {%- else -%}
+                    {{ 'Staan' if aantal > 1 else 'Staat' }} {{ tekst_bak }} al aan de weg?
+                  {%- endif -%}
+                data:
+                  tag: afvalmelding
+                  actions:
+                    - action: "{{ actie_ja }}"
+                      title: "Ja"
+                    - action: "{{ actie_nee }}"
+                      title: "Nog niet"
+
+      - wait_for_trigger:
+          - trigger: event
+            event_type: mobile_app_notification_action
+            event_data:
+              action: "{{ actie_ja }}"
+            id: ja
+          - trigger: event
+            event_type: mobile_app_notification_action
+            event_data:
+              action: "{{ actie_nee }}"
+            id: nee
+        timeout:
+          minutes: !input herinnering_delay
+        continue_on_timeout: true
+
+      # --- "Ja": klaar, melding opruimen en stoppen ---
+      - if:
+          - condition: template
+            value_template: "{{ wait.trigger is not none and wait.trigger.id == 'ja' }}"
+        then:
+          - repeat:
+              for_each: "{{ apparaten }}"
+              sequence:
+                - action: "notify.mobile_app_{{ device_attr(repeat.item, 'name') | slugify }}"
+                  data:
+                    message: clear_notification
+                    data:
+                      tag: afvalmelding
+          - stop: "Staat al aan de weg."
+
+      # --- "Nog niet": eerst de ingestelde tijd wachten ---
+      - if:
+          - condition: template
+            value_template: "{{ wait.trigger is not none and wait.trigger.id == 'nee' }}"
+        then:
+          - delay:
+              minutes: !input herinnering_delay
+
+      # --- Herinnering (na "Nog niet" of na een timeout) ---
+      - repeat:
+          for_each: "{{ apparaten }}"
+          sequence:
+            - action: "notify.mobile_app_{{ device_attr(repeat.item, 'name') | slugify }}"
+              data:
+                title: "{{ '🗑️ Afvalmelding test' if is_test and aantal == 0 else '🗑️ Afvalmelding laatste herinnering!' }}"
+                message: >-
+                  {%- if aantal == 0 -%}
+                    Test van de laatste herinnering.
+                  {%- else -%}
+                    Dit is je laatste herinnering: vergeet {{ tekst_bak }} niet!
+                  {%- endif -%}
+                data:
+                  tag: afvalmelding
