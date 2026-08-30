@@ -62,6 +62,8 @@ script:
 
 ## Versies
 
+**v5.2** — Alle afvalsoorten optioneel en oud papier bak toegevoegd.
+
 **v5.1** — Nieuwe meldingsteksten met correcte enkelvoud/meervoud, titels gelijkgetrokken, pauze tussen testmeldingen.
 
 **v5** — "Nog niet"-knop werkt nu daadwerkelijk, unieke action-ID's per run, device-selector in plaats van notify-entiteiten, moderne triggersyntax, ongebruikte helpers verwijderd.
