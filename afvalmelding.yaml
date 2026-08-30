@@ -1,13 +1,23 @@
 blueprint:
-  name: Afvalmelding met herinnering en interactie (v5.1)
+  name: Afvalmelding met herinnering en interactie (v5.2)
   description: >-
     Stuurt 's avonds een melding als er morgen afval opgehaald wordt, en later
     op de avond een vraag met Ja/Nee-knoppen of de bak al aan de weg staat.
+
+
     - "Ja"         -> klaar voor vandaag, de melding wordt van je telefoon gehaald.
+
     - "Nog niet"   -> na X minuten alsnog een herinnering.
+
     - Geen reactie -> na X minuten een herinnering.
-    Testen: vuur het event `afvalmelding_test` af via Instellingen > Tools > 
+
+
+    Testen: vuur het event `afvalmelding_test` af via Ontwikkelhulpmiddelen >
     Gebeurtenissen. Beide meldingen worden dan direct achter elkaar getest.
+
+
+    Alle afvalsoorten zijn optioneel: vul alleen in wat er in jouw gemeente
+    wordt opgehaald.
 
   domain: automation
   source_url: https://github.com/Ruud-St/ha-afvalmelding-blueprint/blob/main/afvalmelding.yaml
@@ -21,25 +31,34 @@ blueprint:
       input:
         restafval_sensor:
           name: Sensor restafval
+          default: ""
           selector:
             entity:
               filter:
                 - domain: sensor
         pbd_sensor:
           name: Sensor plastic (PBD)
+          default: ""
           selector:
             entity:
               filter:
                 - domain: sensor
         gft_sensor:
           name: Sensor GFT
+          default: ""
+          selector:
+            entity:
+              filter:
+                - domain: sensor
+        papier_sensor:
+          name: Sensor oud papier
+          default: ""
           selector:
             entity:
               filter:
                 - domain: sensor
         kerstboom_sensor:
-          name: Sensor kerstboom (optioneel)
-          description: Laat leeg als je deze niet gebruikt.
+          name: Sensor kerstboom
           default: ""
           selector:
             entity:
@@ -95,6 +114,7 @@ variables:
   restafval_sensor_id: !input restafval_sensor
   pbd_sensor_id: !input pbd_sensor
   gft_sensor_id: !input gft_sensor
+  papier_sensor_id: !input papier_sensor
   kerstboom_sensor_id: !input kerstboom_sensor
   apparaten: !input notify_devices
 
@@ -103,11 +123,12 @@ variables:
   bakken: >-
     {%- set ns = namespace(l=[]) -%}
     {%- set bronnen = [
-        (restafval_sensor_id, 'het restafval',    'de restafvalbak'),
-        (pbd_sensor_id,       'het plasticafval', 'de PBD-bak'),
-        (gft_sensor_id,       'het gft-afval',    'de gft-bak'),
-        (kerstboom_sensor_id, 'de kerstboom',     'de kerstboom')
-      ] -%}
+         (restafval_sensor_id, 'het restafval',    'de restafvalbak'),
+         (pbd_sensor_id,       'het plasticafval', 'de PBD-bak'),
+         (gft_sensor_id,       'het gft-afval',    'de gft-bak'),
+         (papier_sensor_id,    'het oud papier',   'de papierbak'),
+         (kerstboom_sensor_id, 'de kerstboom',     'de kerstboom')
+       ] -%}
     {%- for sid, kort, bak in bronnen -%}
       {%- if sid and state_attr(sid, 'days_until_collection_date') | int(-1) == 1 -%}
         {%- set ns.l = ns.l + [[kort, bak]] -%}
