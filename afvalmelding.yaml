@@ -1,5 +1,5 @@
 blueprint:
-  name: Afvalmelding met herinnering en interactie (v5.2)
+  name: Afvalmelding met herinnering en interactie (v5.3)
   description: >-
     Stuurt 's avonds een melding als er morgen afval opgehaald wordt, en later
     op de avond een vraag met Ja/Nee-knoppen of de bak al aan de weg staat.
@@ -12,7 +12,12 @@ blueprint:
     - Geen reactie -> na X minuten een herinnering.
 
 
-    Testen: vuur het event `afvalmelding_test` af via Ontwikkelhulpmiddelen >
+    Optioneel: maak je een helper aan, dan krijgt de eerste melding al een
+    knop "Ja, staat buiten". Druk je die in, dan wordt de vraag later op de
+    avond overgeslagen.
+
+
+    Testen: vuur het event `afvalmelding_test` af via Instellingen > Tools >
     Gebeurtenissen. Beide meldingen worden dan direct achter elkaar getest.
 
 
@@ -107,6 +112,24 @@ blueprint:
               unit_of_measurement: minuten
               mode: slider
 
+    vooraf:
+      name: Optioneel
+      icon: mdi:check-circle-outline
+      collapsed: true
+      input:
+        helper_vroeg:
+          name: Helper voor vooraf bevestigen
+          description: >-
+            Maak eerst een aparte helper aan van het type Schakelaar
+            (Instellingen > Apparaten & diensten > Helpers), bijvoorbeeld met
+            de naam "Afval vooraf bevestigd", en kies die hier. Leeg laten =
+            geen knop.
+          default: ""
+          selector:
+            entity:
+              filter:
+                - domain: input_boolean
+
 mode: restart
 max_exceeded: silent
 
@@ -117,6 +140,7 @@ variables:
   papier_sensor_id: !input papier_sensor
   kerstboom_sensor_id: !input kerstboom_sensor
   apparaten: !input notify_devices
+  helper_id: !input helper_vroeg
 
   # Lijst met paren: [korte naam, bak-naam]
   # bijv. [['het gft-afval', 'de gft-bak']]
@@ -167,10 +191,20 @@ triggers:
   - trigger: event
     event_type: afvalmelding_test
     id: test
+  # "Ja, staat buiten" bij de eerste melding. Een trigger (en geen wachtende
+  # run), zodat een druk ook na een herstart van HA wordt opgevangen.
+  - trigger: event
+    event_type: mobile_app_notification_action
+    event_data:
+      action: AFVAL_JA_VROEG
+    id: vroeg_ja
 
 conditions:
   - condition: template
-    value_template: "{{ trigger.id == 'test' or aantal > 0 }}"
+    value_template: >-
+      {{ trigger.id == 'test'
+         or (trigger.id == 'vroeg_ja' and helper_id != '')
+         or (trigger.id != 'vroeg_ja' and aantal > 0) }}
 
 actions:
   # Unieke action-ID's per run, zodat oude notificaties nooit een
@@ -179,6 +213,33 @@ actions:
       actie_ja: "AFVAL_JA_{{ context.id }}"
       actie_nee: "AFVAL_NEE_{{ context.id }}"
       is_test: "{{ trigger.id == 'test' }}"
+      # Met helper: eerste melding krijgt een "Ja, staat buiten"-knop
+      data_eerste: >-
+        {%- if helper_id -%}
+        {{ {'tag': 'afvalmelding', 'actions': [{'action': 'AFVAL_JA_VROEG', 'title': 'Ja, staat buiten'}]} }}
+        {%- else -%}
+        {{ {'tag': 'afvalmelding'} }}
+        {%- endif -%}
+
+  # ---------------------------------------------------------------
+  # 0. "Ja, staat buiten" gedrukt bij de eerste melding
+  # ---------------------------------------------------------------
+  - if:
+      - condition: template
+        value_template: "{{ trigger.id == 'vroeg_ja' }}"
+    then:
+      - action: input_boolean.turn_on
+        target:
+          entity_id: "{{ helper_id }}"
+      - repeat:
+          for_each: "{{ apparaten }}"
+          sequence:
+            - action: "notify.mobile_app_{{ device_attr(repeat.item, 'name') | slugify }}"
+              data:
+                message: clear_notification
+                data:
+                  tag: afvalmelding
+      - stop: "Vooraf bevestigd."
 
   # ---------------------------------------------------------------
   # 1. Eerste melding (en bij een test)
@@ -187,6 +248,13 @@ actions:
       - condition: template
         value_template: "{{ trigger.id in ['eerste_melding', 'test'] }}"
     then:
+      - if:
+          - condition: template
+            value_template: "{{ helper_id != '' }}"
+        then:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: "{{ helper_id }}"
       - repeat:
           for_each: "{{ apparaten }}"
           sequence:
@@ -195,13 +263,13 @@ actions:
                 title: "{{ '🗑️ Afvalmelding test' if is_test and aantal == 0 else '🗑️ Afvalmelding' }}"
                 message: >-
                   {%- if aantal == 0 -%}
-                    Dit is een test. Er wordt morgen niets opgehaald, maar je notificaties werken.
+                  Dit is een test. Er wordt morgen niets opgehaald, maar je notificaties werken.
                   {%- else -%}
-                    Morgen {{ 'worden' if aantal > 1 else 'wordt' }} {{ tekst_kort }} opgehaald.
-                    Vergeet niet om {{ wat_buiten }} aan de weg te zetten.
+                  Morgen {{ 'worden' if aantal > 1 else 'wordt' }} {{ tekst_kort }} opgehaald.
+
+                  Vergeet niet om {{ wat_buiten }} aan de weg te zetten.
                   {%- endif -%}
-                data:
-                  tag: afvalmelding
+                data: "{{ data_eerste }}"
 
   # ---------------------------------------------------------------
   # Bij een test even pauzeren, anders vervangt melding 2 de eerste
@@ -221,6 +289,17 @@ actions:
       - condition: template
         value_template: "{{ trigger.id in ['vraag_melding', 'test'] }}"
     then:
+      - if:
+          - condition: template
+            value_template: >-
+              {{ trigger.id == 'vraag_melding' and helper_id != ''
+                 and is_state(helper_id, 'on') }}
+        then:
+          # Meteen weer uit, zodat de helper nooit langer dan één avond aan staat
+          - action: input_boolean.turn_off
+            target:
+              entity_id: "{{ helper_id }}"
+          - stop: "Al vooraf bevestigd, vraag overgeslagen."
       - repeat:
           for_each: "{{ apparaten }}"
           sequence:
