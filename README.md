@@ -14,6 +14,8 @@ Deze afvalherinnering met interactieve meldingen stuurt 's avonds een melding al
 
 De laatste herinnering komt alleen als je op **Nog niet** drukt of helemaal niet reageert. Druk je op **Ja**, dan wordt de melding van je telefoon gehaald en gebeurt er verder niets meer.
 
+Optioneel kun je de eerste melding al bevestigen met de knop **Ja, staat buiten**. Druk je die in, dan wordt de vraag later op de avond overgeslagen. Zie [Bevestigen bij de eerste melding](#bevestigen-bij-de-eerste-melding-optioneel).
+
 Teksten passen zich aan het aantal bakken aan:
 
 - één bak: *Morgen wordt het gft-afval opgehaald. Vergeet niet om de bak aan de weg te zetten.*
@@ -39,8 +41,17 @@ Teksten passen zich aan het aantal bakken aan:
 | Tijd eerste melding | Standaard 19:00 |
 | Tijd vraag met knoppen | Standaard 22:00 |
 | Minuten tot herinnering | Standaard 15 |
+| Helper voor vooraf bevestigen | Optioneel, zie hieronder |
 
 Alle afvalsoorten zijn optioneel: vul alleen in wat er in jouw gemeente wordt opgehaald.
+
+### Bevestigen bij de eerste melding (optioneel)
+
+1. Maak een helper aan via **Instellingen → Apparaten & diensten → Helpers → Helper aanmaken → Schakelaar**, bijvoorbeeld met de naam "Afval bevestigd"
+2. Laat **Restore previous state** geselecteerd staan (standaard al zo)
+3. Kies die helper in de blueprint onder **Optioneel**
+
+Laat je dit leeg, dan werkt alles zoals voorheen, alleen zonder knop bij de eerste melding.
 
 ## Testen
 
@@ -74,8 +85,11 @@ Je bestaande automations blijven bestaan en houden hun instellingen. Nieuwe inst
 - **Apple Watch** werkt zonder extra instellingen: iOS spiegelt de melding inclusief knoppen. Selecteer gewoon de iPhone.
 - **Fitbit** kan de melding wel tonen, maar de knoppen niet gebruiken.
 - Alle meldingen delen de tag `afvalmelding`, zodat een nieuwe melding de vorige vervangt in plaats van ernaast te komen staan.
+- De keuze "Ja, staat buiten" blijft bewaard bij een herstart van Home Assistant, zolang de helper op **Restore previous state** staat (de standaardinstelling).
 
 ## Versies
+
+**v5.3** — Optionele knop "Ja, staat buiten" bij de eerste melding, waarmee de vraag later op de avond wordt overgeslagen. Inspringing in de eerste melding opgelost.
 
 **v5.2** — Alle afvalsoorten zijn vanaf nu optioneel en er is een oudpapierbak toegevoegd.
 
